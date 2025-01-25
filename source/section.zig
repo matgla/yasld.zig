@@ -1,5 +1,5 @@
 //
-// yasld.zig
+// section.zig
 //
 // Copyright (C) 2025 Mateusz Stadnik <matgla@live.com>
 //
@@ -18,5 +18,9 @@
 // <https://www.gnu.org/licenses/>.
 //
 
-pub const Loader = @import("loader.zig").Loader;
-pub const Executable = @import("executable.zig").Executable;
+pub const Section = enum(u2) {
+    Code = 0,
+    Data = 1,
+    Init = 2,
+    Unknown = 3,
+};

@@ -1,5 +1,5 @@
 //
-// yasld.zig
+// dependency.zig
 //
 // Copyright (C) 2025 Mateusz Stadnik <matgla@live.com>
 //
@@ -18,5 +18,18 @@
 // <https://www.gnu.org/licenses/>.
 //
 
-pub const Loader = @import("loader.zig").Loader;
-pub const Executable = @import("executable.zig").Executable;
+const std = @import("std");
+
+pub const Dependency = struct {
+    pub fn name(self: *const Dependency) [:0]const u8 {
+        return std.mem.span(@as([*:0]const u8, @ptrCast(self)));
+    }
+
+    pub fn size(self: *const Dependency, alignment: u8) usize {
+        return std.mem.alignForward(usize, self.name().len + 1, alignment);
+    }
+
+    pub fn next(self: *const Dependency, alignment: u8) *const Dependency {
+        return @ptrFromInt(@intFromPtr(self) + self.size(alignment));
+    }
+};

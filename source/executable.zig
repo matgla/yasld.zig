@@ -1,5 +1,5 @@
 //
-// yasld.zig
+// executable.zig
 //
 // Copyright (C) 2025 Mateusz Stadnik <matgla@live.com>
 //
@@ -18,5 +18,12 @@
 // <https://www.gnu.org/licenses/>.
 //
 
-pub const Loader = @import("loader.zig").Loader;
-pub const Executable = @import("executable.zig").Executable;
+const Module = @import("module.zig").Module;
+
+pub const Executable = struct {
+    module: Module = undefined,
+
+    pub fn main(_: Executable, _: []const []const u8, _: u32) i32 {
+        return -1;
+    }
+};
