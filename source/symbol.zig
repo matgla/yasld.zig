@@ -23,8 +23,8 @@ const std = @import("std");
 const Section = @import("section.zig").Section;
 
 pub const Symbol = packed struct {
-    section: Section,
-    index: u30,
+    section: u2,
+    offset: u30,
 
     pub fn name(self: *const Symbol) []const u8 {
         return std.mem.span(@as([*:0]const u8, @ptrFromInt(@intFromPtr(self) + @sizeOf(Symbol))));

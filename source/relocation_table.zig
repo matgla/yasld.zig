@@ -31,7 +31,7 @@ pub const SymbolTableRelocation = packed struct {
 
 pub const DataRelocation = packed struct {
     to: u32,
-    section: Section,
+    section: u2,
     from: u30,
 
     pub fn next(self: DataRelocation) *const DataRelocation {
@@ -40,7 +40,7 @@ pub const DataRelocation = packed struct {
 };
 
 pub const LocalRelocation = packed struct {
-    section: Section,
+    section: u2,
     index: u30,
     target_offset: u32,
 

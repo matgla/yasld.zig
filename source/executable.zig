@@ -20,10 +20,21 @@
 
 const Module = @import("module.zig").Module;
 
+extern fn call_main(argc: i32, argv: [*]const [*:0]const u8, address: usize, lot: *const anyopaque) i32;
+extern fn call_entry(address: usize, lot: *const anyopaque) i32;
+
 pub const Executable = struct {
     module: Module = undefined,
 
-    pub fn main(_: Executable, _: []const []const u8, _: u32) i32 {
-        return -1;
+    pub fn main(self: Executable, argv: [*]const [*:0]const u8, argc: i32) error{MainNotExits}!i32 {
+        if (self.module.entry) |entry| {
+            return call_entry(entry, self.module.lot.?.ptr);
+        }
+
+        const maybe_symbol = self.module.find_symbol("main");
+        if (maybe_symbol) |symbol| {
+            return call_main(argc, argv, symbol, self.module.lot.?.ptr);
+        }
+        return error.MainNotExits;
     }
 };

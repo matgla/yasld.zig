@@ -62,6 +62,20 @@ pub fn ItemTable(comptime ItemType: anytype) type {
             };
         }
 
+        pub fn element_at(self: Self, index: usize) ?*const ItemType {
+            var it = self.iter();
+            var i: usize = 0;
+            while (it) |symbol| : ({
+                it = symbol.next();
+                i += 1;
+            }) {
+                if (i == index) {
+                    return symbol.data;
+                }
+            }
+            return null;
+        }
+
         pub const Iterator = struct {
             data: *const ItemType,
             end: *const ItemType,

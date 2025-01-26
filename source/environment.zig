@@ -1,5 +1,5 @@
 //
-// section.zig
+// environment.zig
 //
 // Copyright (C) 2025 Mateusz Stadnik <matgla@live.com>
 //
@@ -18,10 +18,25 @@
 // <https://www.gnu.org/licenses/>.
 //
 
-pub const Section = enum(u3) {
-    Code = 0,
-    Data = 1,
-    Init = 2,
-    Unknown = 3,
-    Bss = 4,
+// Create some kind of static builder for OS to export necessary stuff
+// Right now just stub to pass loader code
+
+const std = @import("std");
+
+pub const SymbolEntry = struct {
+    name: []const u8,
+    address: usize,
+};
+
+pub const Environment = struct {
+    symbols: []const SymbolEntry,
+
+    pub fn find_symbol(self: Environment, name: []const u8) ?SymbolEntry {
+        for (self.symbols) |symbol| {
+            if (std.mem.eql(u8, symbol.name, name)) {
+                return symbol;
+            }
+        }
+        return null;
+    }
 };

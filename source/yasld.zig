@@ -20,3 +20,5 @@
 
 pub const Loader = @import("loader.zig").Loader;
 pub const Executable = @import("executable.zig").Executable;
+pub const Environment = @import("environment.zig").Environment;
+pub const SymbolEntry = @import("environment.zig").SymbolEntry;

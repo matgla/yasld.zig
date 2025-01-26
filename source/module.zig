@@ -25,9 +25,9 @@ const Section = @import("section.zig").Section;
 
 // move this to architecture implementation
 pub const ForeignCallContext = extern struct {
-    r9: usize,
-    lr: usize,
-    temp: [2]usize,
+    r9: usize = 0,
+    lr: usize = 0,
+    temp: [2]usize = .{ 0, 0 },
 };
 
 pub const Module = struct {
@@ -43,12 +43,11 @@ pub const Module = struct {
     imported_modules: std.ArrayList(Module),
     // this needs to be corelated with thread info
     active: bool,
+    entry: ?usize = null,
 
-    pub fn init(allocator: std.mem.Allocator, text: []const u8, name: []const u8) Module {
+    pub fn init(allocator: std.mem.Allocator) Module {
         return .{
             .allocator = allocator,
-            .text = text,
-            .name = name,
             .foreign_call_context = .{},
             .imported_modules = std.ArrayList(Module).init(allocator),
             .active = false,
@@ -83,27 +82,32 @@ pub const Module = struct {
     // imported modules must use it's own memory thus cannot be shared
     pub fn allocate_modules(self: *Module, number_of_modules: usize) !void {
         _ = try self.imported_modules.addManyAsSlice(number_of_modules);
+        for (self.imported_modules.items) |*module| {
+            module.* = Module.init(self.allocator);
+        }
     }
 
-    fn get_base_address(self: Module, section: Section) error{UnknownSection}!usize {
+    pub fn get_base_address(self: Module, section: Section) error{UnknownSection}!usize {
         switch (section) {
-            .Code => return @intFromPtr(self.text),
-            .Data => return @intFromPtr(self.data.?),
-            .Init => return @intFromPtr(self.init.?),
+            .Code => return @intFromPtr(self.text.?.ptr),
+            .Data => return @intFromPtr(self.data.?.ptr),
+            .Init => return @intFromPtr(self.init_memory.?.ptr),
+            .Bss => return @intFromPtr(self.bss.?.ptr),
             .Unknown => return error.UnknownSection,
         }
     }
 
     pub fn find_symbol(self: Module, name: []const u8) ?usize {
-        var it = self.exported_symbols.iter();
+        var it = self.exported_symbols.?.iter();
 
         while (it) |symbol| : (it = symbol.next()) {
-            if (std.mem.eql(u8, symbol.name(), name)) {
-                return self.get_base_address(symbol.data.section) + symbol.data.offset;
+            if (std.mem.eql(u8, symbol.data.name(), name)) {
+                const base = self.get_base_address(@enumFromInt(symbol.data.section)) catch return null;
+                return base + symbol.data.offset;
             }
         }
 
-        for (self.imported_modules) |module| {
+        for (self.imported_modules.items) |module| {
             const maybe_symbol = module.find_symbol(name);
             if (maybe_symbol) |symbol| {
                 return symbol;
@@ -186,7 +190,7 @@ pub const Module = struct {
             return self;
         }
 
-        for (self.imported_modules) |module| {
+        for (self.imported_modules.items) |module| {
             const maybe_module = module.find_module_for_program_counter(pc, only_active);
             if (maybe_module) |m| {
                 return m;
@@ -201,7 +205,7 @@ pub const Module = struct {
             return self;
         }
 
-        for (self.imported_modules) |module| {
+        for (self.imported_modules.items) |module| {
             const maybe_module = module.find_module_with_lot(lot_address);
             if (maybe_module) |m| {
                 return m;

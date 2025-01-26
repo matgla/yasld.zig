@@ -18,6 +18,8 @@
 // <https://www.gnu.org/licenses/>.
 //
 
+const std = @import("std");
+
 pub const Type = enum(u8) {
     Unknown = 0,
     Executable = 1,
@@ -52,8 +54,30 @@ pub const Header = packed struct {
     imported_symbols_amount: u16,
 };
 
+pub fn print_header(header: *const Header, stdout: anytype) void {
+    stdout.write("  YAFF header: {\n");
+    stdout.print("    marker: '{s}' (0x{x}),\n", .{ std.mem.asBytes(&header.marker), header.marker });
+    stdout.print("    type: {s},\n", .{@tagName(@as(Type, @enumFromInt(header.module_type)))});
+    stdout.print("    arch: {s},\n", .{@tagName(@as(Architecture, @enumFromInt(header.arch)))});
+    stdout.print("    yaff_version: {d},\n", .{header.yasiff_version});
+    stdout.print("    code_length: {d},\n", .{header.code_length});
+    stdout.print("    init_length: {d},\n", .{header.init_length});
+    stdout.print("    data_length: {d},\n", .{header.data_length});
+    stdout.print("    bss_length: {d},\n", .{header.bss_length});
+    stdout.print("    entry: 0x{x},\n", .{header.entry});
+    stdout.print("    external_libraries: 0x{x},\n", .{header.external_libraries_amount});
+    stdout.print("    alignment: {d},\n", .{header.alignment});
+    stdout.print("    version: {d}.{d},\n", .{ header.version_major, header.version_minor });
+    stdout.write("    relocations:\n");
+    stdout.print("      symbol_table: {d},\n", .{header.symbol_table_relocations_amount});
+    stdout.print("      local: {d},\n", .{header.local_relocations_amount});
+    stdout.print("      data: {d},\n", .{header.data_relocations_amount});
+    stdout.print("    exported_symbols: {d},\n", .{header.exported_symbols_amount});
+    stdout.print("    imported_symbols: {d},\n", .{header.exported_symbols_amount});
+    stdout.write("  }\n");
+}
+
 comptime {
-    const std = @import("std");
     var buf: [30]u8 = undefined;
     if (@sizeOf(Header) != 48) @compileError("Header has incorrect size: " ++ (std.fmt.bufPrint(&buf, "{d}", .{@sizeOf(Header)}) catch "unknown"));
 }

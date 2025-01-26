@@ -27,6 +27,7 @@ const Symbol = @import("symbol.zig").Symbol;
 const Dependency = @import("dependency.zig").Dependency;
 const relocation = @import("relocation_table.zig");
 const Header = @import("header.zig").Header;
+const Section = @import("section.zig").Section;
 
 const SymbolTableRelocations = relocation.RelocationTable(relocation.SymbolTableRelocation);
 const LocalRelocations = relocation.RelocationTable(relocation.LocalRelocation);
@@ -43,6 +44,7 @@ pub const Parser = struct {
     text_address: usize,
     init_address: usize,
     data_address: usize,
+    header: *const Header,
 
     pub fn create(header: *const Header) Parser {
         const name: []const u8 = std.mem.span(@as([*:0]const u8, @ptrFromInt(@intFromPtr(header) + @sizeOf(Header))));
@@ -95,6 +97,7 @@ pub const Parser = struct {
             .text_address = text,
             .init_address = init,
             .data_address = init + header.init_length,
+            .header = header,
         };
     }
 
@@ -114,29 +117,34 @@ pub const Parser = struct {
         }
         stdout.print("local relocations: {d}\n", .{self.local_relocations.relocations.len});
         for (self.local_relocations.relocations) |rel| {
-            stdout.print("  index: 0x{x}, target_offset: 0x{x}, section: {s}\n", .{ rel.index, rel.target_offset, @tagName(rel.section) });
+            stdout.print("  index: 0x{x}, target_offset: 0x{x}, section: {s}\n", .{ rel.index, rel.target_offset, @tagName(@as(Section, @enumFromInt(rel.section))) });
         }
         stdout.print("data relocations: {d}\n", .{self.data_relocations.relocations.len});
         for (self.data_relocations.relocations) |rel| {
-            stdout.print("  from: 0x{x}, to: 0x{x}, section: {s}\n", .{ rel.from, rel.to, @tagName(rel.section) });
+            stdout.print("  from: 0x{x}, to: 0x{x}, section: {s}\n", .{ rel.from, rel.to, @tagName(@as(Section, @enumFromInt(rel.section))) });
         }
         {
             stdout.print("imported symbols: {d}\n", .{self.imported_symbols.number_of_items});
             var it = self.imported_symbols.iter();
             while (it) |symbol| : (it = symbol.next()) {
                 const name = symbol.data.name();
-                stdout.print("  {s}: index: {d}\n", .{ name, symbol.data.index });
+                stdout.print("  {s}: offset: {d}\n", .{ name, symbol.data.offset });
             }
         }
         {
             stdout.print("exported symbols: {d}\n", .{self.exported_symbols.number_of_items});
             var it = self.exported_symbols.iter();
             while (it) |symbol| : (it = symbol.next()) {
-                stdout.print("  {s}: index: {d}\n", .{ symbol.data.name(), symbol.data.index });
+                stdout.print("  {s}: offset: {d}\n", .{ symbol.data.name(), symbol.data.offset });
             }
         }
         stdout.print(".text: 0x{x}\n", .{self.text_address});
         stdout.print(".init: 0x{x}\n", .{self.init_address});
         stdout.print(".data: 0x{x}\n", .{self.data_address});
+    }
+
+    pub fn get_data(self: Parser) []const u8 {
+        const ptr: [*]const u8 = @ptrFromInt(self.data_address);
+        return ptr[0..self.header.data_length];
     }
 };
