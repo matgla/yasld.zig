@@ -46,26 +46,29 @@ pub const Parser = struct {
     data_address: usize,
     header: *const Header,
 
-    pub fn create(header: *const Header) Parser {
+    pub fn create(header: *const Header, stdout: anytype) Parser {
         const name: []const u8 = std.mem.span(@as([*:0]const u8, @ptrFromInt(@intFromPtr(header) + @sizeOf(Header))));
 
+        stdout.print("name: {s}, 0x{x} size: {d}\n", .{ name, @intFromPtr(name.ptr), name.len });
         const imported_libraries = DependencyTable{
             .number_of_items = header.external_libraries_amount,
             .alignment = header.alignment,
             .root = @as(*const Dependency, @ptrFromInt(std.mem.alignForward(usize, @intFromPtr(name.ptr) + name.len, header.alignment))),
         };
 
-        const symbol_table_array: [*]relocation.SymbolTableRelocation = @ptrFromInt(imported_libraries.address() + imported_libraries.size());
+        stdout.print("imported libraries address: 0x{x}, size: {d}\n", .{ imported_libraries.address(), imported_libraries.size() });
+        const symbol_table_array: [*]align(4) relocation.SymbolTableRelocation = @ptrFromInt(imported_libraries.address() + imported_libraries.size());
+
         const symbol_table_relocations = SymbolTableRelocations{
             .relocations = symbol_table_array[0..header.symbol_table_relocations_amount],
         };
 
-        const local_relocation_array: [*]relocation.LocalRelocation = @ptrFromInt(symbol_table_relocations.address() + symbol_table_relocations.size());
+        const local_relocation_array: [*]align(4) relocation.LocalRelocation = @ptrFromInt(symbol_table_relocations.address() + symbol_table_relocations.size());
         const local_relocations = LocalRelocations{
             .relocations = local_relocation_array[0..header.local_relocations_amount],
         };
 
-        const data_relocation_array: [*]relocation.DataRelocation = @ptrFromInt(local_relocations.address() + local_relocations.size());
+        const data_relocation_array: [*]align(4) relocation.DataRelocation = @ptrFromInt(local_relocations.address() + local_relocations.size());
         const data_relocations = DataRelocations{
             .relocations = data_relocation_array[0..header.data_relocations_amount],
         };
@@ -146,5 +149,10 @@ pub const Parser = struct {
     pub fn get_data(self: Parser) []const u8 {
         const ptr: [*]const u8 = @ptrFromInt(self.data_address);
         return ptr[0..self.header.data_length];
+    }
+
+    pub fn get_text(self: Parser) []const u8 {
+        const ptr: [*]const u8 = @ptrFromInt(self.text_address);
+        return ptr[0..self.header.code_length];
     }
 };

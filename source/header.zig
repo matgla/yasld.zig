@@ -49,7 +49,7 @@ pub const Header = packed struct {
     symbol_table_relocations_amount: u16,
     local_relocations_amount: u16,
     data_relocations_amount: u16,
-    _reserved2: u16,
+    got_size: u16,
     exported_symbols_amount: u16,
     imported_symbols_amount: u16,
 };
@@ -60,10 +60,10 @@ pub fn print_header(header: *const Header, stdout: anytype) void {
     stdout.print("    type: {s},\n", .{@tagName(@as(Type, @enumFromInt(header.module_type)))});
     stdout.print("    arch: {s},\n", .{@tagName(@as(Architecture, @enumFromInt(header.arch)))});
     stdout.print("    yaff_version: {d},\n", .{header.yasiff_version});
-    stdout.print("    code_length: {d},\n", .{header.code_length});
-    stdout.print("    init_length: {d},\n", .{header.init_length});
-    stdout.print("    data_length: {d},\n", .{header.data_length});
-    stdout.print("    bss_length: {d},\n", .{header.bss_length});
+    stdout.print("    code_length: 0x{x},\n", .{header.code_length});
+    stdout.print("    init_length: 0x{x},\n", .{header.init_length});
+    stdout.print("    data_length: 0x{x},\n", .{header.data_length});
+    stdout.print("    bss_length: 0x{x},\n", .{header.bss_length});
     stdout.print("    entry: 0x{x},\n", .{header.entry});
     stdout.print("    external_libraries: 0x{x},\n", .{header.external_libraries_amount});
     stdout.print("    alignment: {d},\n", .{header.alignment});
@@ -72,6 +72,7 @@ pub fn print_header(header: *const Header, stdout: anytype) void {
     stdout.print("      symbol_table: {d},\n", .{header.symbol_table_relocations_amount});
     stdout.print("      local: {d},\n", .{header.local_relocations_amount});
     stdout.print("      data: {d},\n", .{header.data_relocations_amount});
+    stdout.print("      got_size: {d},\n", .{header.got_size});
     stdout.print("    exported_symbols: {d},\n", .{header.exported_symbols_amount});
     stdout.print("    imported_symbols: {d},\n", .{header.exported_symbols_amount});
     stdout.write("  }\n");

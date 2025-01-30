@@ -58,7 +58,9 @@ pub const Loader = struct {
 
     pub fn load_executable(self: Loader, module: *const anyopaque, stdout: anytype) !Executable {
         stdout.print("[yasld] loading executable from: 0x{x}\n", .{@intFromPtr(module)});
-        var executable: Executable = .{ .module = Module.init(self.allocator) };
+        var executable: Executable = .{
+            .module = Module.init(self.allocator),
+        };
         try self.load_module(&executable.module, module, stdout);
         return executable;
     }
@@ -98,18 +100,26 @@ pub const Loader = struct {
 
     fn process_data(_: Loader, header: *const Header, parser: *const Parser, module: *Module) !void {
         const data_initializer = parser.get_data();
-        try module.allocate_data(header.data_length, header.bss_length);
-        @memcpy(module.data.?[0..header.data_length], data_initializer);
-        @memset(module.bss.?[0..header.bss_length], 0);
+        const text = parser.get_text();
+        try module.allocate_program(header.data_length + header.bss_length + header.code_length + header.init_length + header.got_size);
+        @memcpy(module.program.?[0..header.code_length], text);
+        const data_start = header.code_length + header.init_length;
+        const data_end = data_start + header.data_length;
+        @memcpy(module.program.?[data_start..data_end], data_initializer);
+        const bss_start = data_end;
+        const bss_end = bss_start + header.bss_length;
+        @memset(module.program.?[bss_start..bss_end], 0);
     }
 
     fn process_symbol_table_relocations(self: Loader, parser: *const Parser, module: *Module, stdout: anytype) !void {
+        var got = module.get_got();
         for (parser.symbol_table_relocations.relocations) |rel| {
             const maybe_symbol = parser.imported_symbols.element_at(rel.symbol_index);
             if (maybe_symbol) |symbol| {
                 const maybe_address = self.find_symbol(module, symbol.name());
                 if (maybe_address) |address| {
-                    module.lot.?[rel.index] = address;
+                    stdout.print("[yasld] Setting GOT[{d}] to: 0x{x}\n", .{ rel.index, address });
+                    got[rel.index] = address;
                 } else {
                     stdout.print("[yasld] Can't find symbol: '{s}'\n", .{symbol.name()});
                     return LoaderError.SymbolNotFound;
@@ -134,16 +144,18 @@ pub const Loader = struct {
     }
 
     fn process_local_relocations(_: Loader, parser: *const Parser, module: *Module) !void {
+        var got = module.get_got();
         for (parser.local_relocations.relocations) |rel| {
             const relocated_start_address: usize = try module.get_base_address(@enumFromInt(rel.section));
             const relocated = relocated_start_address + rel.target_offset;
-            module.lot.?[rel.index] = relocated;
+            got[rel.index] = relocated;
         }
     }
 
     fn process_data_relocations(_: Loader, parser: *const Parser, module: *Module) !void {
+        const data_memory = module.get_data();
         for (parser.data_relocations.relocations) |rel| {
-            const address_to_change: usize = @intFromPtr(module.data.?.ptr) + rel.to;
+            const address_to_change: usize = @intFromPtr(data_memory.ptr) + rel.to;
             const target: *usize = @ptrFromInt(address_to_change);
             const base_address_from: usize = try module.get_base_address(@enumFromInt(rel.section));
             const address_from: usize = base_address_from + rel.from;
@@ -154,33 +166,33 @@ pub const Loader = struct {
     fn load_module(self: Loader, module: *Module, module_address: *const anyopaque, stdout: anytype) !void {
         stdout.write("[yasld] parsing header\n");
         const header = self.process_header(module_address) catch |err| return err;
+        module.set_header(header);
         print_header(header, stdout);
 
-        const parser = Parser.create(header);
+        const parser = Parser.create(header, stdout);
         parser.print(stdout);
 
-        const table_size: usize = header.symbol_table_relocations_amount + header.local_relocations_amount;
         module.name = parser.name;
-        try module.allocate_lot(table_size);
-        const text_ptr: [*]const u8 = @ptrFromInt(parser.text_address);
-        module.text = text_ptr[0..header.code_length];
         try self.import_child_modules(header, &parser, module, stdout);
         // import modules
         try self.process_data(header, &parser, module);
         module.exported_symbols = parser.exported_symbols;
 
-        const init_ptr: [*]const usize = @ptrFromInt(parser.init_address);
+        const init_ptr: [*]const u8 = @ptrFromInt(parser.init_address);
         try module.relocate_init(init_ptr[0..header.init_length]);
 
         try self.process_symbol_table_relocations(&parser, module, stdout);
         try self.process_local_relocations(&parser, module);
         try self.process_data_relocations(&parser, module);
 
+        stdout.print("[yasld] GOT loaded at 0x{x}\n", .{@intFromPtr(module.get_got().ptr)});
+        stdout.print("[yasld] text loaded at 0x{x}\n", .{@intFromPtr(module.program.?.ptr)});
+
         if (header.entry != 0xffffffff and header.module_type == @intFromEnum(Type.Executable)) {
             var section: Section = .Unknown;
-            const text_limit: usize = module.text.?.len;
-            const init_limit: usize = text_limit + module.init_memory.?.len * @sizeOf(usize);
-            const data_limit: usize = init_limit + module.data.?.len;
+            const text_limit: usize = module.get_text().len;
+            const init_limit: usize = text_limit + module.get_init().len;
+            const data_limit: usize = init_limit + module.get_data().len;
 
             if (header.entry < text_limit) {
                 section = .Code;

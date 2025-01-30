@@ -22,6 +22,7 @@ const std = @import("std");
 
 const SymbolTable = @import("item_table.zig").SymbolTable;
 const Section = @import("section.zig").Section;
+const Header = @import("header.zig").Header;
 
 // move this to architecture implementation
 pub const ForeignCallContext = extern struct {
@@ -32,11 +33,8 @@ pub const ForeignCallContext = extern struct {
 
 pub const Module = struct {
     allocator: std.mem.Allocator,
-    lot: ?[]usize = null,
-    text: ?[]const u8 = null,
-    data: ?[]u8 = null,
-    init_memory: ?[]usize = null,
-    bss: ?[]u8 = null,
+    program_memory: ?[]u8 = null,
+    program: ?[]u8 = null,
     exported_symbols: ?SymbolTable = null,
     name: ?[]const u8 = null,
     foreign_call_context: ForeignCallContext,
@@ -44,6 +42,7 @@ pub const Module = struct {
     // this needs to be corelated with thread info
     active: bool,
     entry: ?usize = null,
+    header: *const Header = undefined,
 
     pub fn init(allocator: std.mem.Allocator) Module {
         return .{
@@ -54,29 +53,21 @@ pub const Module = struct {
         };
     }
 
+    pub fn set_header(self: *Module, header: *const Header) void {
+        self.header = header;
+    }
+
     pub fn deinit(self: *Module) void {
-        if (self.lot) |lot| {
-            self.allocator.free(lot);
-        }
-        if (self.data) |data| {
-            self.allocator.free(data);
-        }
-        if (self.init_memory) |i| {
-            self.allocator.free(i);
-        }
-        if (self.bss) |bss| {
-            self.allocator.free(bss);
+        if (self.program_memory) |program| {
+            self.allocator.free(program);
         }
         self.imported_modules.deinit();
     }
 
-    pub fn allocate_lot(self: *Module, size: usize) !void {
-        self.lot = try self.allocator.alloc(usize, size);
-    }
-
-    pub fn allocate_data(self: *Module, data_size: usize, bss_size: usize) !void {
-        self.data = try self.allocator.alloc(u8, data_size);
-        self.bss = try self.allocator.alloc(u8, bss_size);
+    pub fn allocate_program(self: *Module, program_size: usize) !void {
+        self.program_memory = try self.allocator.alloc(u8, program_size + 16);
+        const bytes_to_align = @as(usize, @intFromPtr(self.program_memory.?.ptr)) % 16;
+        self.program = self.program_memory.?[bytes_to_align..];
     }
 
     // imported modules must use it's own memory thus cannot be shared
@@ -89,10 +80,10 @@ pub const Module = struct {
 
     pub fn get_base_address(self: Module, section: Section) error{UnknownSection}!usize {
         switch (section) {
-            .Code => return @intFromPtr(self.text.?.ptr),
-            .Data => return @intFromPtr(self.data.?.ptr),
-            .Init => return @intFromPtr(self.init_memory.?.ptr),
-            .Bss => return @intFromPtr(self.bss.?.ptr),
+            .Code => return @intFromPtr(self.program.?.ptr),
+            .Data => return @intFromPtr(self.program.?.ptr) + self.header.code_length + self.header.init_length,
+            .Init => return @intFromPtr(self.program.?.ptr) + self.header.code_length,
+            .Bss => return @intFromPtr(self.program.?.ptr) + self.header.code_length + self.header.data_length + self.header.init_length,
             .Unknown => return error.UnknownSection,
         }
     }
@@ -125,23 +116,46 @@ pub const Module = struct {
         UnhandledInitAddress,
     };
 
-    pub fn relocate_init(self: *Module, initializers: []const usize) !void {
-        self.init_memory = try self.allocator.alloc(usize, initializers.len);
-        // @memcpy(self.init_memory.?[0..initializers.len], initializers);
-        const text_end: usize = self.text.?.len;
-        const init_end: usize = self.init_memory.?.len * @sizeOf(usize);
-        const data_end: usize = self.data.?.len;
-        const bss_end: usize = self.bss.?.len;
+    pub fn get_text(self: *Module) []u8 {
+        return self.program.?[0..self.header.code_length];
+    }
 
-        for (0..initializers.len) |i| {
-            if (initializers[i] < text_end) {
-                self.init_memory.?[i] = initializers[i] + @intFromPtr(self.text.?.ptr);
-            } else if (initializers[i] < init_end) {
-                self.init_memory.?[i] = initializers[i] + @intFromPtr(self.init_memory.?.ptr);
-            } else if (initializers[i] < data_end) {
-                self.init_memory.?[i] = initializers[i] + @intFromPtr(self.data.?.ptr);
-            } else if (initializers[i] < bss_end) {
-                self.init_memory.?[i] = initializers[i] + @intFromPtr(self.bss.?.ptr);
+    pub fn get_init(self: *Module) []u8 {
+        const init_start = self.header.code_length;
+        const init_end = init_start + self.header.init_length;
+        return self.program.?[init_start..init_end];
+    }
+
+    pub fn get_data(self: *Module) []u8 {
+        const data_start = self.header.code_length + self.header.init_length;
+        const data_end = data_start + self.header.data_length;
+        return self.program.?[data_start..data_end];
+    }
+
+    pub fn get_bss(self: *Module) []u8 {
+        const bss_start = self.header.code_length + self.header.init_length + self.header.data_length;
+        const bss_end = bss_start + self.header.bss_length;
+        return self.program.?[bss_start..bss_end];
+    }
+
+    pub fn relocate_init(self: *Module, initializers: []const u8) !void {
+        var init_data = self.get_init();
+        @memcpy(init_data, initializers);
+        const text_end: usize = self.header.code_length;
+        const init_end: usize = text_end + self.header.init_length;
+        const data_end: usize = init_end + self.header.data_length;
+        const bss_end: usize = data_end + self.header.bss_length;
+
+        for (0..init_data.len) |i| {
+            const entry: *u32 = @ptrCast(@alignCast(&init_data[i * 4]));
+            if (entry.* < text_end) {
+                entry.* = entry.* + @intFromPtr(self.get_text().ptr);
+            } else if (entry.* < init_end) {
+                entry.* = entry.* + @intFromPtr(self.get_init().ptr);
+            } else if (entry.* < data_end) {
+                entry.* = entry.* + @intFromPtr(self.get_data().ptr);
+            } else if (entry.* < bss_end) {
+                entry.* = entry.* + @intFromPtr(self.get_bss().ptr);
             } else {
                 return ModuleError.UnhandledInitAddress;
             }
@@ -200,13 +214,20 @@ pub const Module = struct {
         return null;
     }
 
-    pub fn find_module_with_lot(self: *const Module, lot_address: usize) ?*Module {
-        if (lot_address == @as(usize, @intFromPtr(self.lot.?.ptr))) {
+    pub fn get_got(self: *const Module) []usize {
+        const got_start = self.header.code_length + self.header.data_length + self.header.init_length + self.header.bss_length;
+        const got_end = (self.header.got_size / 4);
+
+        return @as([*]usize, @ptrFromInt(@intFromPtr(self.program.?.ptr) + got_start))[0..got_end];
+    }
+
+    pub fn find_module_with_got(self: *const Module, got_address: usize) ?*Module {
+        if (got_address == @as(usize, @intFromPtr(self.get_got().ptr))) {
             return self;
         }
 
         for (self.imported_modules.items) |module| {
-            const maybe_module = module.find_module_with_lot(lot_address);
+            const maybe_module = module.find_module_with_got(got_address);
             if (maybe_module) |m| {
                 return m;
             }

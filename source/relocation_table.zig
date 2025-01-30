@@ -51,7 +51,7 @@ pub const LocalRelocation = packed struct {
 
 pub fn RelocationTable(comptime RelocationType: anytype) type {
     return struct {
-        relocations: []RelocationType,
+        relocations: []align(4) RelocationType,
 
         const Self = @This();
 
