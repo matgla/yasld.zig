@@ -216,9 +216,22 @@ pub const Module = struct {
 
     pub fn get_got(self: *const Module) []usize {
         const got_start = self.header.code_length + self.header.data_length + self.header.init_length + self.header.bss_length;
-        const got_end = (self.header.got_size / 4);
+        const got_end = (self.header.got_length / 4);
 
         return @as([*]usize, @ptrFromInt(@intFromPtr(self.program.?.ptr) + got_start))[0..got_end];
+    }
+    pub fn get_got_plt(self: *const Module) []usize {
+        const got_plt_start = self.header.code_length + self.header.data_length + self.header.init_length + self.header.bss_length + self.header.got_length;
+        const got_plt_end = (self.header.got_plt_length / 4);
+
+        return @as([*]usize, @ptrFromInt(@intFromPtr(self.program.?.ptr) + got_plt_start))[0..got_plt_end];
+    }
+
+    pub fn get_plt(self: *const Module) []usize {
+        const plt_start = self.header.code_length + self.header.data_length + self.header.init_length + self.header.bss_length + self.header.got_length + self.header.got_plt_length;
+        const plt_end = (self.header.plt_length / 4);
+
+        return @as([*]usize, @ptrFromInt(@intFromPtr(self.program.?.ptr) + plt_start))[0..plt_end];
     }
 
     pub fn find_module_with_got(self: *const Module, got_address: usize) ?*Module {

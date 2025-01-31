@@ -40,6 +40,10 @@ const LoaderError = error{
     ChildLoadingFailure,
 };
 
+export fn resolver() void {
+    while (true) {}
+}
+
 pub const Loader = struct {
     // OS should provide pointer to XIP region, it must be copied to RAM if needed
     pub const FileResolver = *const fn (name: []const u8) ?*anyopaque;
@@ -98,10 +102,10 @@ pub const Loader = struct {
         }
     }
 
-    fn process_data(_: Loader, header: *const Header, parser: *const Parser, module: *Module) !void {
+    fn process_data(_: Loader, header: *const Header, parser: *const Parser, module: *Module, stdout: anytype) !void {
         const data_initializer = parser.get_data();
         const text = parser.get_text();
-        try module.allocate_program(header.data_length + header.bss_length + header.code_length + header.init_length + header.got_size);
+        try module.allocate_program(header.data_length + header.bss_length + header.code_length + header.init_length + header.got_plt_length + header.got_length + header.plt_length);
         @memcpy(module.program.?[0..header.code_length], text);
         const data_start = header.code_length + header.init_length;
         const data_end = data_start + header.data_length;
@@ -109,25 +113,37 @@ pub const Loader = struct {
         const bss_start = data_end;
         const bss_end = bss_start + header.bss_length;
         @memset(module.program.?[bss_start..bss_end], 0);
+        const got_start = bss_end;
+        const got_end = got_start + header.got_length;
+        const got_data = parser.get_got();
+        stdout.print("[yasld] copying .got from: 0x{x} to: 0x{x}, size: {d}\n", .{ @intFromPtr(got_data.ptr), @intFromPtr(&module.program.?[got_start]), got_data.len });
+        @memcpy(module.program.?[got_start..got_end], got_data);
+
+        const got_plt_start = got_end;
+        const got_plt_end = got_plt_start + header.got_plt_length;
+        const got_plt_data = parser.get_got_plt();
+        stdout.print("[yasld] copying .got.plt from: 0x{x} to: 0x{x}, size: {d}\n", .{ @intFromPtr(got_plt_data.ptr), @intFromPtr(&module.program.?[got_plt_start]), got_plt_data.len });
+        @memcpy(module.program.?[got_plt_start..got_plt_end], got_plt_data);
+
+        const plt_start = got_plt_end;
+        const plt_end = plt_start + header.plt_length;
+        const plt_data = parser.get_plt();
+        stdout.print("[yasld] copying .plt from: 0x{x} to: 0x{x}, size: {d}\n", .{ @intFromPtr(plt_data.ptr), @intFromPtr(&module.program.?[plt_start]), plt_data.len });
+        @memcpy(module.program.?[plt_start..plt_end], plt_data);
     }
 
-    fn process_symbol_table_relocations(self: Loader, parser: *const Parser, module: *Module, stdout: anytype) !void {
-        var got = module.get_got();
-        for (parser.symbol_table_relocations.relocations) |rel| {
-            const maybe_symbol = parser.imported_symbols.element_at(rel.symbol_index);
-            if (maybe_symbol) |symbol| {
-                const maybe_address = self.find_symbol(module, symbol.name());
-                if (maybe_address) |address| {
-                    stdout.print("[yasld] Setting GOT[{d}] to: 0x{x}\n", .{ rel.index, address });
-                    got[rel.index] = address;
-                } else {
-                    stdout.print("[yasld] Can't find symbol: '{s}'\n", .{symbol.name()});
-                    return LoaderError.SymbolNotFound;
-                }
-            } else {
-                return LoaderError.SymbolNotFound;
-            }
+    fn process_symbol_table_relocations(_: Loader, _: *const Parser, module: *Module, stdout: anytype) !void {
+        var got = module.get_got_plt();
+        const plt = module.get_plt();
+        for (0..got.len) |i| {
+            const address = @intFromPtr(&plt[0]) + 1;
+            stdout.print("[yasld] Setting GOT[{d}] to: 0x{x}\n", .{ i, address });
+            got[i] = address;
         }
+
+        const resolver_address = @intFromPtr(&resolver);
+        stdout.print("[yasld] Setting GOT[0] to: 0x{x}\n", .{resolver_address});
+        got[0] = resolver_address;
     }
 
     fn find_symbol(self: Loader, module: *Module, name: []const u8) ?usize {
@@ -175,7 +191,7 @@ pub const Loader = struct {
         module.name = parser.name;
         try self.import_child_modules(header, &parser, module, stdout);
         // import modules
-        try self.process_data(header, &parser, module);
+        try self.process_data(header, &parser, module, stdout);
         module.exported_symbols = parser.exported_symbols;
 
         const init_ptr: [*]const u8 = @ptrFromInt(parser.init_address);

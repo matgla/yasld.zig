@@ -44,6 +44,9 @@ pub const Parser = struct {
     text_address: usize,
     init_address: usize,
     data_address: usize,
+    got_address: usize,
+    got_plt_address: usize,
+    plt_address: usize,
     header: *const Header,
 
     pub fn create(header: *const Header, stdout: anytype) Parser {
@@ -88,7 +91,10 @@ pub const Parser = struct {
 
         const text: usize = std.mem.alignForward(usize, exported_array.address() + exported_array.size(), 16);
         const init: usize = text + header.code_length;
-
+        const data: usize = init + header.init_length;
+        const got: usize = data + header.data_length;
+        const got_plt: usize = got + header.got_length;
+        const plt: usize = got_plt + header.got_plt_length;
         return Parser{
             .name = name,
             .imported_libraries = imported_libraries,
@@ -99,7 +105,10 @@ pub const Parser = struct {
             .exported_symbols = exported_array,
             .text_address = text,
             .init_address = init,
-            .data_address = init + header.init_length,
+            .data_address = data,
+            .got_address = got,
+            .got_plt_address = got_plt,
+            .plt_address = plt,
             .header = header,
         };
     }
@@ -144,6 +153,9 @@ pub const Parser = struct {
         stdout.print(".text: 0x{x}\n", .{self.text_address});
         stdout.print(".init: 0x{x}\n", .{self.init_address});
         stdout.print(".data: 0x{x}\n", .{self.data_address});
+        stdout.print(".got: 0x{x}\n", .{self.got_address});
+        stdout.print(".got.plt: 0x{x}\n", .{self.got_plt_address});
+        stdout.print(".plt: 0x{x}\n", .{self.plt_address});
     }
 
     pub fn get_data(self: Parser) []const u8 {
@@ -154,5 +166,20 @@ pub const Parser = struct {
     pub fn get_text(self: Parser) []const u8 {
         const ptr: [*]const u8 = @ptrFromInt(self.text_address);
         return ptr[0..self.header.code_length];
+    }
+
+    pub fn get_got(self: Parser) []const u8 {
+        const ptr: [*]const u8 = @ptrFromInt(self.got_address);
+        return ptr[0..self.header.got_length];
+    }
+
+    pub fn get_got_plt(self: Parser) []const u8 {
+        const ptr: [*]const u8 = @ptrFromInt(self.got_plt_address);
+        return ptr[0..self.header.got_plt_length];
+    }
+
+    pub fn get_plt(self: Parser) []const u8 {
+        const ptr: [*]const u8 = @ptrFromInt(self.plt_address);
+        return ptr[0..self.header.plt_length];
     }
 };

@@ -20,8 +20,7 @@
 
 .thumb
 .syntax unified
-.arch armv6-m
-.cpu cortex-m0plus
+.cpu cortex-m33
 
 /*
 r0 - int argc
