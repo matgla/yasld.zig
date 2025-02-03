@@ -113,7 +113,14 @@ pub const Loader = struct {
         const bss_start = data_end;
         const bss_end = bss_start + header.bss_length;
         @memset(module.program.?[bss_start..bss_end], 0);
-        const got_start = bss_end;
+
+        const plt_start = bss_end;
+        const plt_end = plt_start + header.plt_length;
+        const plt_data = parser.get_plt();
+        stdout.print("[yasld] copying .plt from: 0x{x} to: 0x{x}, size: {d}\n", .{ @intFromPtr(plt_data.ptr), @intFromPtr(&module.program.?[plt_start]), plt_data.len });
+        @memcpy(module.program.?[plt_start..plt_end], plt_data);
+
+        const got_start = plt_end;
         const got_end = got_start + header.got_length;
         const got_data = parser.get_got();
         stdout.print("[yasld] copying .got from: 0x{x} to: 0x{x}, size: {d}\n", .{ @intFromPtr(got_data.ptr), @intFromPtr(&module.program.?[got_start]), got_data.len });
@@ -124,26 +131,33 @@ pub const Loader = struct {
         const got_plt_data = parser.get_got_plt();
         stdout.print("[yasld] copying .got.plt from: 0x{x} to: 0x{x}, size: {d}\n", .{ @intFromPtr(got_plt_data.ptr), @intFromPtr(&module.program.?[got_plt_start]), got_plt_data.len });
         @memcpy(module.program.?[got_plt_start..got_plt_end], got_plt_data);
-
-        const plt_start = got_plt_end;
-        const plt_end = plt_start + header.plt_length;
-        const plt_data = parser.get_plt();
-        stdout.print("[yasld] copying .plt from: 0x{x} to: 0x{x}, size: {d}\n", .{ @intFromPtr(plt_data.ptr), @intFromPtr(&module.program.?[plt_start]), plt_data.len });
-        @memcpy(module.program.?[plt_start..plt_end], plt_data);
     }
 
-    fn process_symbol_table_relocations(_: Loader, _: *const Parser, module: *Module, stdout: anytype) !void {
+    fn process_symbol_table_relocations(self: Loader, parser: *const Parser, module: *Module, stdout: anytype) !void {
         var got = module.get_got_plt();
-        const plt = module.get_plt();
+        const text = module.get_text();
+        const module_start = @intFromPtr(text.ptr);
         for (0..got.len) |i| {
-            const address = @intFromPtr(&plt[0]) + 1;
+            const address = module_start + got[i];
             stdout.print("[yasld] Setting GOT[{d}] to: 0x{x}\n", .{ i, address });
             got[i] = address;
         }
 
-        const resolver_address = @intFromPtr(&resolver);
-        stdout.print("[yasld] Setting GOT[0] to: 0x{x}\n", .{resolver_address});
-        got[0] = resolver_address;
+        for (parser.symbol_table_relocations.relocations) |rel| {
+            const maybe_symbol = parser.imported_symbols.element_at(rel.symbol_index);
+            if (maybe_symbol) |symbol| {
+                const maybe_address = self.find_symbol(module, symbol.name());
+                if (maybe_address) |address| {
+                    stdout.print("[yasld] Setting GOT[{d}] to: 0x{x}\n", .{ rel.index, address });
+                    got[rel.index] = address;
+                } else {
+                    stdout.print("[yasld] Can't find symbol: '{s}'\n", .{symbol.name()});
+                    return LoaderError.SymbolNotFound;
+                }
+            } else {
+                return LoaderError.SymbolNotFound;
+            }
+        }
     }
 
     fn find_symbol(self: Loader, module: *Module, name: []const u8) ?usize {
